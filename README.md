@@ -15,15 +15,17 @@
 
 ## Overview
 
-**Kushn** is a robust and lightweight utility written in Rust for generating SHA256 hashes of files. It recursively scans all files in the current directory and its subdirectories, creating a JSON file. This file provides a clear overview of each file and its corresponding hash.
+**Kushn** is a robust and lightweight utility written in Rust for generating SHA256 hashes of files. <br />
+It recursively scans all files in the current directory and its subdirectories, creating a JSON file. <br />
+This file provides a clear overview of each file and its corresponding hash.
 
 ---
 
 ## Features
 
 - **Hashing:** Generates SHA256 hashes for all files in the current directory and nested directories.
-**Customizable Output:** Allows specification of a custom output file name.
-**Ignores Files or Folders:** Supports the use of a `.kushnignore` file to specify files, folders, or file types to be excluded from the scan.
+- **Customizable Output:** Allows specification of a custom output file name.
+- **Ignores Files or Folders:** Supports the use of a `.kushnignore` file to specify files, folders, or file types to be excluded from the scan.
 
 ---
 
@@ -57,16 +59,17 @@ kushn --name your_name.json
 
 To ignore specific files, folders, nested folders, or file types during the scan, create a `.kushnignore` file in the root directory.
 
-Ignore a folder: `folder`
-Ignore a nested folder: `folder/subfolder`
-Ignore a specific file type: `*.txt`
-Ignore a specific file: `test.txt` or `folder/test.txt`
+- Ignore a folder: `folder`
+- Ignore a nested folder: `folder/subfolder`
+- Ignore a specific file type: `*.txt`
+- Ignore a specific file: `test.txt` or `folder/test.txt`
 
 ---
 
 ## Output
 
-The output will be a JSON file (`kushn_result.json` by default, or a custom name if specified) containing an array of objects. Each object represents a file and its hash.
+The output will be a JSON file (`kushn_result.json` by default, or a custom name if specified) containing an array of objects.  <br />
+Each object represents a file and its hash.
 
 Example output:
 
