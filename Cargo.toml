@@ -1,0 +1,18 @@
+[package]
+name = "kushn"
+version = "0.1.0"
+edition = "2021"
+authors = ["dan0xe <dan0xe@proton.me>"]
+description = "Kushn is a robust and lightweight utility written in Rust for generating SHA256 hashes of files. It recursively scans all files in the current directory and its subdirectories, creating a JSON file. This file provides a clear overview of each file and its corresponding hash."
+license = "MIT"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ignore = "0.4.1"
+sha2 = "0.9.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.69"
+walkdir = "2.3.2"
+glob = "0.3.0"
