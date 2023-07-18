@@ -65,7 +65,7 @@ fn process_directory<P: AsRef<Path>>(directory_path: P, ignore: &Vec<String>) ->
                     let pattern = glob::Pattern::new(&full_pattern).unwrap();
                     pattern.matches_path_with(relative_path, glob::MatchOptions::new())
                 }) {
-                    continue; // Skip the entire directory
+                    continue;
                 }
             } else {
                 if let Some(relative_path_str) = relative_path.to_str() {
@@ -74,7 +74,7 @@ fn process_directory<P: AsRef<Path>>(directory_path: P, ignore: &Vec<String>) ->
                         let pattern = glob::Pattern::new(&full_pattern).unwrap();
                         pattern.matches(relative_path_str)
                     }) {
-                        continue; // Skip files within ignored directory
+                        continue;
                     }
                 }
             }
@@ -105,7 +105,7 @@ fn main() {
         Vec::new()
     };
 
-    let file_hashes = process_directory(&current_dir, &ignore_patterns);
+    let mut file_hashes = process_directory(&current_dir, &ignore_patterns);
 
     let output_file_name = match env::args().position(|arg| arg == "--name") {
         Some(index) => {
@@ -121,12 +121,27 @@ fn main() {
         None => "kushn_result.json".to_owned(),
     };
 
-    let output_file_path = current_dir.join(output_file_name.clone());
-    let output_file = fs::File::create(output_file_path).expect("Failed to create output file.");
+    let output_file_path = current_dir.join(&output_file_name);
+    let output_file = fs::File::create(&output_file_path).expect("Failed to create output file.");
 
     let json_output =
         serde_json::to_string_pretty(&file_hashes).expect("Failed to convert file hashes to JSON.");
 
+    io::BufWriter::new(&output_file)
+        .write_all(json_output.as_bytes())
+        .expect("Failed to write JSON output to file.");
+
+    let result_file_hash =
+        calculate_file_hash(&output_file_path).expect("Failed to calculate file hash.");
+    let result_file_entry = FileHash {
+        path: output_file_name.clone(),
+        hash: result_file_hash,
+    };
+    file_hashes.push(result_file_entry);
+
+    let output_file = fs::File::create(&output_file_path).expect("Failed to create output file.");
+    let json_output =
+        serde_json::to_string_pretty(&file_hashes).expect("Failed to convert file hashes to JSON.");
     io::BufWriter::new(output_file)
         .write_all(json_output.as_bytes())
         .expect("Failed to write JSON output to file.");
