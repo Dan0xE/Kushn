@@ -6,6 +6,10 @@ use thiserror::Error;
 use walkdir::WalkDir;
 
 #[derive(Serialize, Deserialize)]
+/// Represents a hashed file entry produced by [`process_file`] or [`process_directory`].
+///
+/// The `path` field always contains a relative path (from the directory that was
+/// processed) and `hash` stores the lowercase hexadecimal SHA-256 digest.
 pub struct FileHash {
     pub path: String,
     pub hash: String,
@@ -25,6 +29,26 @@ pub enum KushnError {
 
 pub type KushnResult<T> = Result<T, KushnError>;
 
+/// Computes the SHA-256 digest for the file at `file_path`.
+///
+/// # Errors
+/// Returns [`KushnError::Io`] if the file cannot be opened or read.
+///
+/// # Examples
+/// ```
+/// use kushn::{calculate_file_hash, KushnResult};
+/// use std::io::Write;
+/// use tempfile::NamedTempFile;
+///
+/// # fn main() -> KushnResult<()> {
+/// let mut file = NamedTempFile::new()?;
+/// write!(file, "kushn")?;
+///
+/// let digest = calculate_file_hash(file.path())?;
+/// assert_eq!(digest.len(), 64);
+/// # Ok(())
+/// # }
+/// ```
 pub fn calculate_file_hash<P: AsRef<Path>>(file_path: P) -> KushnResult<String> {
     let mut file = fs::File::open(file_path)?;
     let mut hasher = Sha256::new();
@@ -33,6 +57,37 @@ pub fn calculate_file_hash<P: AsRef<Path>>(file_path: P) -> KushnResult<String> 
     Ok(format!("{:x}", hash_result))
 }
 
+/// Processes a single file and returns its hash unless it matches an ignore pattern.
+///
+/// This helper strips the current working directory from the final entry path so
+/// downstream consumers receive relative paths.
+///
+/// # Errors
+/// * [`KushnError::Io`] if the file cannot be read or the current directory is unavailable.
+/// * [`KushnError::GlobPattern`] if an ignore pattern fails to compile.
+///
+/// # Examples
+/// ```
+/// use kushn::{process_file, KushnResult};
+/// use std::env;
+/// use std::fs;
+/// use tempfile::tempdir;
+///
+/// # fn main() -> KushnResult<()> {
+/// let dir = tempdir()?;
+/// let file = dir.path().join("example.txt");
+/// fs::write(&file, "example")?;
+///
+/// let original = env::current_dir()?;
+/// env::set_current_dir(dir.path())?;
+///
+/// let entry = process_file("example.txt", &[])?.expect("file should be hashed");
+/// assert_eq!(entry.path, "example.txt");
+///
+/// env::set_current_dir(original)?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn process_file<P: AsRef<Path>>(
     file_path: P,
     ignore: &[String],
@@ -65,6 +120,34 @@ pub fn process_file<P: AsRef<Path>>(
     }))
 }
 
+/// Recursively walks a directory and returns hashed entries that are not ignored.
+///
+/// Directories or files matching any pattern in `ignore` (considered relative to the
+/// provided directory) are skipped. Symlinks are followed
+///
+/// # Errors
+/// * [`KushnError::WalkDir`] if a directory entry cannot be read.
+/// * [`KushnError::GlobPattern`] if an ignore pattern is invalid.
+/// * Any error bubbled up from [`process_file`].
+///
+/// # Examples
+/// ```
+/// use kushn::{process_directory, KushnResult};
+/// use std::fs;
+/// use tempfile::tempdir;
+///
+/// # fn main() -> KushnResult<()> {
+/// let dir = tempdir()?;
+/// fs::write(dir.path().join("keep.txt"), "contents")?;
+/// fs::create_dir(dir.path().join("ignored"))?;
+/// fs::write(dir.path().join("ignored/skip.txt"), "ignored")?;
+///
+/// let entries = process_directory(dir.path(), &["ignored".into()])?;
+/// assert_eq!(entries.len(), 1);
+/// assert_eq!(entries[0].path, "keep.txt");
+/// # Ok(())
+/// # }
+/// ```
 pub fn process_directory<P: AsRef<Path>>(
     directory_path: P,
     ignore: &[String],
