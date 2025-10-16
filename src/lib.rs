@@ -114,3 +114,113 @@ pub fn process_directory<P: AsRef<Path>>(
 
     Ok(results)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use tempfile::tempdir;
+
+    static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> &'static Mutex<()> {
+        ENV_MUTEX.get_or_init(|| Mutex::new(()))
+    }
+
+    fn lock_env_guard() -> MutexGuard<'static, ()> {
+        env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    struct WorkingDirGuard {
+        original: PathBuf,
+    }
+
+    impl WorkingDirGuard {
+        fn set(path: &Path) -> KushnResult<Self> {
+            let original = env::current_dir()?;
+            let canonical = fs::canonicalize(path)?;
+            env::set_current_dir(canonical)?;
+            Ok(Self { original })
+        }
+    }
+
+    impl Drop for WorkingDirGuard {
+        fn drop(&mut self) {
+            let _ = env::set_current_dir(&self.original);
+        }
+    }
+
+    fn with_working_dir<F, R>(dir: &Path, func: F) -> KushnResult<R>
+    where
+        F: FnOnce() -> KushnResult<R>,
+    {
+        let _lock = lock_env_guard();
+        let _guard = WorkingDirGuard::set(dir)?;
+        func()
+    }
+
+    #[test]
+    fn calculate_file_hash_returns_expected_digest() -> KushnResult<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("hello.txt");
+        fs::write(&file_path, b"hello world")?;
+
+        let hash = calculate_file_hash(&file_path)?;
+        let expected = format!("{:x}", Sha256::digest(b"hello world"));
+
+        assert_eq!(hash, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn process_file_respects_ignore_patterns() -> KushnResult<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("ignored.txt");
+        fs::write(&file_path, b"ignore me")?;
+
+        with_working_dir(dir.path(), || {
+            let result = process_file("ignored.txt", &[String::from("ignored.txt")])?;
+            assert!(result.is_none());
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn process_file_returns_hash_for_included_file() -> KushnResult<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("include.txt");
+        fs::write(&file_path, b"include me")?;
+
+        with_working_dir(dir.path(), || {
+            let result = process_file("include.txt", &[])?;
+            let file_hash = result.expect("expected file hash entry");
+            assert_eq!(file_hash.path, "include.txt");
+            let expected = format!("{:x}", Sha256::digest(b"include me"));
+            assert_eq!(file_hash.hash, expected);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn process_directory_skips_ignored_entries() -> KushnResult<()> {
+        let dir = tempdir()?;
+        let keep_file = dir.path().join("keep.txt");
+        fs::write(&keep_file, b"keep")?;
+
+        let skip_dir = dir.path().join("skip");
+        fs::create_dir(&skip_dir)?;
+        fs::write(skip_dir.join("ignored.txt"), b"ignored")?;
+
+        with_working_dir(dir.path(), || {
+            let current_dir = env::current_dir()?;
+            let hashes = process_directory(&current_dir, &[String::from("skip")])?;
+            let mut paths: Vec<_> = hashes.into_iter().map(|entry| entry.path).collect();
+            paths.sort();
+            assert_eq!(paths, vec![String::from("keep.txt")]);
+            Ok(())
+        })
+    }
+}
