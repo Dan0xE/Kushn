@@ -1,10 +1,20 @@
+use clap::Parser;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 
 use kushn::{FileHash, calculate_file_hash, process_directory};
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Output file name for the generated hashes manifest
+    #[arg(short, long, value_name = "FILE", default_value = "kushn_result.json")]
+    name: String,
+}
+
 fn main() {
+    let cli = Cli::parse();
     let current_dir = env::current_dir().expect("Failed to get current directory.");
     let ignore_file_path = current_dir.join(".kushnignore");
 
@@ -20,22 +30,7 @@ fn main() {
     };
 
     let mut file_hashes = process_directory(&current_dir, &ignore_patterns);
-
-    let output_file_name = match env::args().position(|arg| arg == "--name") {
-        Some(index) => {
-            let output_file_arg = env::args().nth(index + 1);
-            match output_file_arg {
-                Some(filename) => filename,
-                None => {
-                    eprintln!(
-                        "No filename provided after --name flag. Using default name kushn_result.json."
-                    );
-                    "kushn_result.json".to_owned()
-                }
-            }
-        }
-        None => "kushn_result.json".to_owned(),
-    };
+    let output_file_name = cli.name;
 
     let output_file_path = current_dir.join(&output_file_name);
     let output_file = fs::File::create(&output_file_path).expect("Failed to create output file.");
