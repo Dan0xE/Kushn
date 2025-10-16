@@ -45,7 +45,7 @@ jobs:
       - name: Run PR benchmarks
         run: |
           set -eo pipefail
-          cargo bench --bench kushn_bench -- --baseline base --save-baseline pr --noplot | tee benchmark-output.txt
+          cargo bench --bench kushn_bench -- --save-baseline pr --noplot | tee benchmark-output.txt
 
       - name: Compare benchmarks
         run: |

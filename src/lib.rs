@@ -29,6 +29,16 @@ pub enum KushnError {
 
 pub type KushnResult<T> = Result<T, KushnError>;
 
+fn build_file_ignore_patterns(ignore: &[String]) -> Result<Vec<glob::Pattern>, glob::PatternError> {
+    ignore
+        .iter()
+        .map(|pattern| {
+            let normalized = pattern.replace('\\', "/");
+            glob::Pattern::new(&format!("**/{}", normalized))
+        })
+        .collect()
+}
+
 /// Computes the SHA-256 digest for the file at `file_path`.
 ///
 /// # Errors
@@ -96,13 +106,7 @@ pub fn process_file<P: AsRef<Path>>(
     let base_dir = env::current_dir()?;
     let relative_path = file_path.strip_prefix(&base_dir).unwrap_or(file_path);
 
-    let ignore_patterns = ignore
-        .iter()
-        .map(|pattern| {
-            let normalized = pattern.replace('\\', "/");
-            glob::Pattern::new(&format!("**/{}", normalized))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let ignore_patterns = build_file_ignore_patterns(ignore)?;
 
     let match_options = glob::MatchOptions::new();
     if ignore_patterns
@@ -148,6 +152,7 @@ pub fn process_file<P: AsRef<Path>>(
 /// # Ok(())
 /// # }
 /// ```
+#[inline]
 pub fn process_directory<P: AsRef<Path>>(
     directory_path: P,
     ignore: &[String],
@@ -162,6 +167,8 @@ pub fn process_directory<P: AsRef<Path>>(
             glob::Pattern::new(&format!("{}/**", normalized))
         })
         .collect::<Result<Vec<_>, _>>()?;
+
+    let file_ignore_patterns = build_file_ignore_patterns(ignore)?;
 
     let match_options = glob::MatchOptions::new();
 
@@ -179,19 +186,28 @@ pub fn process_directory<P: AsRef<Path>>(
         }
 
         if entry.file_type().is_file() {
-            if let Some(relative_path_str) = relative_path.to_str() {
-                let normalized_relative = relative_path_str.replace('\\', "/");
-                if directory_ignore_patterns
-                    .iter()
-                    .any(|pattern| pattern.matches(&normalized_relative))
-                {
-                    continue;
-                }
+            if directory_ignore_patterns
+                .iter()
+                .any(|pattern| pattern.matches_path_with(relative_path, match_options))
+            {
+                continue;
             }
 
-            if let Some(file_hash) = process_file(path, ignore)? {
-                results.push(file_hash);
+            if file_ignore_patterns
+                .iter()
+                .any(|pattern| pattern.matches_path_with(relative_path, match_options))
+            {
+                continue;
             }
+
+            let normalized_relative = relative_path
+                .to_string_lossy()
+                .replace('\\', "/");
+            let hash = calculate_file_hash(path)?;
+            results.push(FileHash {
+                path: normalized_relative,
+                hash,
+            });
         }
     }
 
