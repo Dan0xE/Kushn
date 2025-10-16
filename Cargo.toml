@@ -1,7 +1,7 @@
 [package]
 name = "kushn"
 version = "0.1.3"
-edition = "2021"
+edition = "2024"
 authors = ["dan0xe <dan0xe@proton.me>"]
 description = "Kushn is a robust and lightweight utility written in Rust for generating SHA256 hashes of files."
 license = "MIT"

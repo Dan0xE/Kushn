@@ -23,12 +23,12 @@ fn calculate_file_hash<P: AsRef<Path>>(file_path: P) -> Result<String, io::Error
 
 fn process_file<P: AsRef<Path>>(
     file_path: P,
-    ignore: &Vec<String>,
+    ignore: &[String],
 ) -> Result<Option<FileHash>, io::Error> {
     let file_path = file_path.as_ref();
     let relative_path = file_path
         .strip_prefix(env::current_dir()?)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
 
     let ignore_patterns = ignore
         .iter()
@@ -38,12 +38,12 @@ fn process_file<P: AsRef<Path>>(
 
     if ignore_patterns
         .iter()
-        .any(|pattern| pattern.matches_path_with(&relative_path, glob::MatchOptions::new()))
+        .any(|pattern| pattern.matches_path_with(relative_path, glob::MatchOptions::new()))
     {
         return Ok(None);
     }
 
-    let hash = calculate_file_hash(&file_path)?;
+    let hash = calculate_file_hash(file_path)?;
     let path_string = relative_path.to_string_lossy().into_owned();
     Ok(Some(FileHash {
         path: path_string,
@@ -51,7 +51,7 @@ fn process_file<P: AsRef<Path>>(
     }))
 }
 
-fn process_directory<P: AsRef<Path>>(directory_path: P, ignore: &Vec<String>) -> Vec<FileHash> {
+fn process_directory<P: AsRef<Path>>(directory_path: P, ignore: &[String]) -> Vec<FileHash> {
     let mut results = Vec::new();
 
     for entry in WalkDir::new(&directory_path).follow_links(true).into_iter() {
@@ -67,17 +67,14 @@ fn process_directory<P: AsRef<Path>>(directory_path: P, ignore: &Vec<String>) ->
                 }) {
                     continue;
                 }
-            } else {
-                if let Some(relative_path_str) = relative_path.to_str() {
-                    if ignore.iter().any(|pattern| {
-                        let full_pattern = format!("{}/**", pattern.replace("\\", "/"));
-                        let pattern = glob::Pattern::new(&full_pattern).unwrap();
-                        pattern.matches(relative_path_str)
-                    }) {
-                        continue;
-                    }
+            } else if let Some(relative_path_str) = relative_path.to_str()
+                && ignore.iter().any(|pattern| {
+                    let full_pattern = format!("{}/**", pattern.replace("\\", "/"));
+                    let pattern = glob::Pattern::new(&full_pattern).unwrap();
+                    pattern.matches(relative_path_str)
+                }) {
+                    continue;
                 }
-            }
 
             if let Ok(Some(file_hash)) = process_file(path, ignore) {
                 results.push(file_hash);
