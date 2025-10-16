@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::{env, fs, io};
+use thiserror::Error;
 use walkdir::WalkDir;
 
 #[derive(Serialize, Deserialize)]
@@ -10,7 +11,21 @@ pub struct FileHash {
     pub hash: String,
 }
 
-pub fn calculate_file_hash<P: AsRef<Path>>(file_path: P) -> Result<String, io::Error> {
+#[derive(Debug, Error)]
+pub enum KushnError {
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("Invalid glob pattern: {0}")]
+    GlobPattern(#[from] glob::PatternError),
+    #[error("Directory traversal error: {0}")]
+    WalkDir(#[from] walkdir::Error),
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+}
+
+pub type KushnResult<T> = Result<T, KushnError>;
+
+pub fn calculate_file_hash<P: AsRef<Path>>(file_path: P) -> KushnResult<String> {
     let mut file = fs::File::open(file_path)?;
     let mut hasher = Sha256::new();
     io::copy(&mut file, &mut hasher)?;
@@ -21,21 +36,23 @@ pub fn calculate_file_hash<P: AsRef<Path>>(file_path: P) -> Result<String, io::E
 pub fn process_file<P: AsRef<Path>>(
     file_path: P,
     ignore: &[String],
-) -> Result<Option<FileHash>, io::Error> {
+) -> KushnResult<Option<FileHash>> {
     let file_path = file_path.as_ref();
-    let relative_path = file_path
-        .strip_prefix(env::current_dir()?)
-        .map_err(io::Error::other)?;
+    let base_dir = env::current_dir()?;
+    let relative_path = file_path.strip_prefix(&base_dir).unwrap_or(file_path);
 
     let ignore_patterns = ignore
         .iter()
-        .map(|pattern| glob::Pattern::new(&format!("**/{}", pattern)))
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+        .map(|pattern| {
+            let normalized = pattern.replace('\\', "/");
+            glob::Pattern::new(&format!("**/{}", normalized))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
+    let match_options = glob::MatchOptions::new();
     if ignore_patterns
         .iter()
-        .any(|pattern| pattern.matches_path_with(relative_path, glob::MatchOptions::new()))
+        .any(|pattern| pattern.matches_path_with(relative_path, match_options))
     {
         return Ok(None);
     }
@@ -48,39 +65,52 @@ pub fn process_file<P: AsRef<Path>>(
     }))
 }
 
-pub fn process_directory<P: AsRef<Path>>(directory_path: P, ignore: &[String]) -> Vec<FileHash> {
+pub fn process_directory<P: AsRef<Path>>(
+    directory_path: P,
+    ignore: &[String],
+) -> KushnResult<Vec<FileHash>> {
+    let directory_path = directory_path.as_ref();
     let mut results = Vec::new();
 
-    for entry in WalkDir::new(&directory_path).follow_links(true).into_iter() {
-        if let Ok(entry) = entry {
-            let path = entry.path();
-            let relative_path = path.strip_prefix(&directory_path).unwrap_or(path);
+    let directory_ignore_patterns = ignore
+        .iter()
+        .map(|pattern| {
+            let normalized = pattern.replace('\\', "/");
+            glob::Pattern::new(&format!("{}/**", normalized))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-            if entry.file_type().is_dir() {
-                if ignore.iter().any(|pattern| {
-                    let full_pattern = format!("{}/**", pattern.replace("\\", "/"));
-                    let pattern = glob::Pattern::new(&full_pattern).unwrap();
-                    pattern.matches_path_with(relative_path, glob::MatchOptions::new())
-                }) {
+    let match_options = glob::MatchOptions::new();
+
+    for entry in WalkDir::new(directory_path).follow_links(true) {
+        let entry = entry?;
+        let path = entry.path();
+        let relative_path = path.strip_prefix(directory_path).unwrap_or(path);
+
+        if entry.file_type().is_dir()
+            && directory_ignore_patterns
+                .iter()
+                .any(|pattern| pattern.matches_path_with(relative_path, match_options))
+        {
+            continue;
+        }
+
+        if entry.file_type().is_file() {
+            if let Some(relative_path_str) = relative_path.to_str() {
+                let normalized_relative = relative_path_str.replace('\\', "/");
+                if directory_ignore_patterns
+                    .iter()
+                    .any(|pattern| pattern.matches(&normalized_relative))
+                {
                     continue;
                 }
-            } else if let Some(relative_path_str) = relative_path.to_str()
-                && ignore.iter().any(|pattern| {
-                    let full_pattern = format!("{}/**", pattern.replace("\\", "/"));
-                    let pattern = glob::Pattern::new(&full_pattern).unwrap();
-                    pattern.matches(relative_path_str)
-                })
-            {
-                continue;
             }
 
-            if let Ok(Some(file_hash)) = process_file(path, ignore) {
+            if let Some(file_hash) = process_file(path, ignore)? {
                 results.push(file_hash);
             }
-        } else if let Err(err) = entry {
-            eprintln!("Error processing entry: {:?}", err);
         }
     }
 
-    results
+    Ok(results)
 }
